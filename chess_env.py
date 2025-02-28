@@ -1,5 +1,6 @@
 import numpy as np
 from chess_engine import ChessEngine
+from chess_visualizer import ChessVisualizer
 
 class ChessEnv:
     """
@@ -7,15 +8,21 @@ class ChessEnv:
     This environment follows a similar API to OpenAI Gym environments.
     """
     
-    def __init__(self):
+    def __init__(self, visualize=False):
         self.engine = ChessEngine()
         self.action_space_size = 64 * 64  # All possible moves from any square to any square
         self.observation_space_shape = (8, 8, 12)  # 8x8 board with 12 channels (6 piece types x 2 colors)
+        self.visualize = visualize
+        self.visualizer = None
+        if visualize:
+            self.visualizer = ChessVisualizer()
         self.reset()
     
     def reset(self):
         """Reset the environment to the initial state"""
         self.engine.reset_board()
+        if self.visualize and self.visualizer:
+            self.visualizer.update(self.engine.board)
         return self._get_observation()
     
     def step(self, action):
@@ -52,32 +59,35 @@ class ChessEnv:
                 move_is_valid = True
                 break
         
-        # If the move is invalid, return a negative reward
         if not move_is_valid:
+            # If the move is invalid, return the current state with a negative reward
             return self._get_observation(), -10, False, {"valid_move": False}
         
         # Make the move
-        captured_piece = self.engine.board[end_row][end_col]
+        captured_piece = self.engine.board[end[0]][end[1]]
         self.engine.make_move(start, end)
+        
+        # Check if the game is over
+        self.engine.check_game_state()
+        done = self.engine.checkmate or self.engine.stalemate
         
         # Calculate reward
         reward = 0
         
         # Reward for capturing pieces
         if captured_piece != 0:
-            piece_values = {1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0}  # Pawn, Knight, Bishop, Rook, Queen, King
-            reward += piece_values[abs(captured_piece)]
+            # Piece values: pawn=1, knight/bishop=3, rook=5, queen=9
+            piece_values = {1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0}
+            piece_type = abs(captured_piece)
+            reward += piece_values.get(piece_type, 0)
         
         # Reward for checkmate
         if self.engine.checkmate:
             reward += 100
         
-        # Penalty for stalemate
-        if self.engine.stalemate:
-            reward -= 50
-        
-        # Check if the game is over
-        done = self.engine.checkmate or self.engine.stalemate
+        # Update the visualizer if enabled
+        if self.visualize and self.visualizer:
+            self.visualizer.update(self.engine.board, last_move=(start, end))
         
         return self._get_observation(), reward, done, {"valid_move": True}
     
@@ -105,7 +115,10 @@ class ChessEnv:
     def render(self, mode='human'):
         """Render the current state of the environment"""
         if mode == 'human':
-            self.engine.print_board()
+            if self.visualize and self.visualizer:
+                self.visualizer.update(self.engine.board)
+            else:
+                self.engine.print_board()
         else:
             return self._get_observation()
     
@@ -127,8 +140,9 @@ class ChessEnv:
         return valid_actions
     
     def close(self):
-        """Clean up resources"""
-        pass
+        """Close the environment"""
+        if self.visualize and self.visualizer:
+            self.visualizer.close()
 
 
 # Example usage

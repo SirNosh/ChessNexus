@@ -217,302 +217,312 @@ def calculate_reward(env, move, captured_piece, move_count):
     return reward
 
 
-def self_play_training(episodes=1000, save_freq=100, model_dir="models", log_file="training_log.json"):
-    """Train the agent using self-play"""
-    # Create directory for saving models if it doesn't exist
+def self_play_training(episodes=1000, save_freq=100, model_dir="models", log_file="training_log.json", visualize=False):
+    """
+    Train a chess agent using self-play.
+    
+    Args:
+        episodes: Number of episodes to train for
+        save_freq: How often to save the model
+        model_dir: Directory to save models
+        log_file: File to log training progress
+        visualize: Whether to visualize the games
+    """
+    # Create model directory if it doesn't exist
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
     
-    # Create the chess environment
-    env = ChessEnv()
-    
-    # Get the state shape and action size
+    # Initialize environment and agent
+    env = ChessEnv(visualize=visualize)
     state_shape = env.observation_space_shape
     action_size = env.action_space_size
     
-    # Create the agent
     agent = SelfPlayAgent(state_shape, action_size)
     
-    # Training statistics
+    # Training metrics
     episode_rewards = []
-    win_counts = {"white": 0, "black": 0, "draw": 0}
+    episode_lengths = []
+    win_rates = {"white": [], "black": [], "draw": []}
     
-    # Logging data
-    log_episodes = []
-    log_rewards = []
-    log_win_rates = []
-    log_epsilons = []
+    # Load existing model if available
+    latest_model = None
+    for file in os.listdir(model_dir):
+        if file.endswith(".weights.h5"):
+            latest_model = file
     
-    # Window size for calculating win rates
-    window_size = 50
+    if latest_model:
+        model_path = os.path.join(model_dir, latest_model)
+        print(f"Loading existing model: {model_path}")
+        agent.load(model_path)
+        
+        # Extract episode number from filename
+        try:
+            episode_start = int(latest_model.split("_")[-1].split(".")[0])
+            print(f"Continuing training from episode {episode_start}")
+        except:
+            episode_start = 0
+    else:
+        episode_start = 0
     
-    for episode in range(episodes):
-        # Reset the environment
+    # Load training log if it exists
+    training_log = {"episode_rewards": [], "episode_lengths": [], "win_rates": {"white": [], "black": [], "draw": []}}
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, 'r') as f:
+                training_log = json.load(f)
+            print(f"Loaded training log from {log_file}")
+        except:
+            print(f"Could not load training log from {log_file}, starting fresh")
+    
+    # Main training loop
+    for episode in range(episode_start, episode_start + episodes):
+        print(f"Episode {episode+1}/{episode_start + episodes}")
+        
+        # Reset environment
         state = env.reset()
         done = False
-        total_reward = 0
+        episode_reward = 0
         move_count = 0
         
-        # Store experiences for both players
-        white_experiences = []
-        black_experiences = []
-        
-        # Play a game
-        while not done and move_count < 200:  # Add move limit to prevent infinite games
+        # Play one episode
+        while not done and move_count < 200:  # Limit to 200 moves to prevent infinite games
             # Get valid actions
             valid_actions = env.get_valid_actions()
             
             if not valid_actions:
                 break
             
-            # Choose an action
+            # Choose action
             action = agent.act(state, valid_actions)
             
-            # Decode the action to get the move
-            start_square_idx = action // 64
-            end_square_idx = action % 64
-            
-            start_row, start_col = start_square_idx // 8, start_square_idx % 8
-            end_row, end_col = end_square_idx // 8, end_square_idx % 8
-            
-            start = (start_row, start_col)
-            end = (end_row, end_col)
-            
-            # Get the captured piece before making the move
-            captured_piece = env.engine.board[end_row][end_col]
-            
-            # Take the action
+            # Take action
             next_state, reward, done, info = env.step(action)
             
-            # Calculate comprehensive reward
-            reward = calculate_reward(env, (start, end), captured_piece, move_count)
+            # Remember the experience
+            agent.remember(state, action, reward, next_state, done)
             
-            # Store the experience based on whose turn it is
-            experience = (state, action, reward, next_state, done)
-            if env.engine.white_to_move:
-                white_experiences.append(experience)
-            else:
-                black_experiences.append(experience)
-            
-            # Update state and total reward
+            # Update state and counters
             state = next_state
-            total_reward += reward
+            episode_reward += reward
             move_count += 1
+            
+            # Train the agent
+            if len(agent.memory) > agent.batch_size:
+                agent.replay()
         
-        # Determine the winner
-        if env.engine.checkmate:
-            winner = "black" if env.engine.white_to_move else "white"
-            win_counts[winner] += 1
-        elif env.engine.stalemate or move_count >= 200:
-            win_counts["draw"] += 1
-        
-        # Process experiences and add to memory
-        # For white's experiences
-        for state, action, reward, next_state, done in white_experiences:
-            # If white won, give positive reward to all its moves
-            if not env.engine.white_to_move and env.engine.checkmate:
-                reward = 1.0
-            # If black won, give negative reward to all white's moves
-            elif env.engine.white_to_move and env.engine.checkmate:
-                reward = -1.0
-            agent.remember(state, action, reward, next_state, done)
-        
-        # For black's experiences
-        for state, action, reward, next_state, done in black_experiences:
-            # If black won, give positive reward to all its moves
-            if env.engine.white_to_move and env.engine.checkmate:
-                reward = 1.0
-            # If white won, give negative reward to all black's moves
-            elif not env.engine.white_to_move and env.engine.checkmate:
-                reward = -1.0
-            agent.remember(state, action, reward, next_state, done)
-        
-        # Train the agent
-        agent.replay()
-        
-        # Update target model periodically
+        # Update target network periodically
         if episode % agent.update_target_every == 0:
             agent.update_target_model()
         
-        # Save the model periodically
-        if episode > 0 and episode % save_freq == 0:
-            agent.save(f"{model_dir}/chess_model_episode_{episode}.weights.h5")
+        # Decay epsilon
+        if agent.epsilon > agent.epsilon_min:
+            agent.epsilon *= agent.epsilon_decay
         
-        # Track statistics
-        episode_rewards.append(total_reward)
+        # Record metrics
+        episode_rewards.append(episode_reward)
+        episode_lengths.append(move_count)
         
-        # Log data for visualization every 10 episodes
-        if episode % 10 == 0:
-            # Calculate win rates over the last window_size episodes
-            total_games = sum(win_counts.values())
-            if total_games > 0:
-                win_rate = {
-                    "white": win_counts["white"] / total_games,
-                    "black": win_counts["black"] / total_games,
-                    "draw": win_counts["draw"] / total_games
-                }
-            else:
-                win_rate = {"white": 0, "black": 0, "draw": 0}
-            
-            log_episodes.append(episode)
-            log_rewards.append(np.mean(episode_rewards[-10:]) if episode_rewards else 0)
-            log_win_rates.append(win_rate)
-            log_epsilons.append(agent.epsilon)
-            
-            # Save the log
-            log_training_progress(log_file, log_episodes, log_rewards, log_win_rates, log_epsilons)
-            
-            # Reset win counts for the next window
-            if episode % window_size == 0 and episode > 0:
-                win_counts = {"white": 0, "black": 0, "draw": 0}
+        # Determine winner
+        if env.engine.checkmate:
+            winner = "black" if env.engine.white_to_move else "white"
+        elif env.engine.stalemate:
+            winner = "draw"
+        else:
+            winner = "draw"  # Default to draw if game ended for other reasons
+        
+        win_rates[winner].append(1)
+        for w in ["white", "black", "draw"]:
+            if w != winner:
+                win_rates[w].append(0)
+        
+        # Update training log
+        training_log["episode_rewards"].append(float(episode_reward))
+        training_log["episode_lengths"].append(move_count)
+        for w in ["white", "black", "draw"]:
+            training_log["win_rates"][w].append(win_rates[w][-1])
+        
+        # Save training log
+        with open(log_file, 'w') as f:
+            json.dump(training_log, f)
         
         # Print progress
-        if episode % 10 == 0:
-            avg_reward = np.mean(episode_rewards[-10:]) if episode_rewards else 0
-            print(f"Episode: {episode}/{episodes}, Moves: {move_count}, Reward: {total_reward:.2f}, Avg Reward: {avg_reward:.2f}, Epsilon: {agent.epsilon:.3f}")
-            print(f"Wins - White: {win_counts['white']}, Black: {win_counts['black']}, Draws: {win_counts['draw']}")
+        print(f"Episode {episode+1}: {move_count} moves, reward={episode_reward:.2f}, epsilon={agent.epsilon:.4f}, winner={winner}")
+        
+        # Save model periodically
+        if (episode + 1) % save_freq == 0:
+            model_path = os.path.join(model_dir, f"chess_model_episode_{episode+1}.weights.h5")
+            agent.save(model_path)
+            print(f"Model saved to {model_path}")
+            
+            # Log training progress
+            log_training_progress(log_file)
     
-    # Save the final model
-    agent.save(f"{model_dir}/chess_model_final.weights.h5")
+    # Save final model
+    model_path = os.path.join(model_dir, f"chess_model_episode_{episode_start + episodes}.weights.h5")
+    agent.save(model_path)
+    print(f"Final model saved to {model_path}")
     
-    print("Training complete!")
-    print(f"Final statistics - Wins: White: {win_counts['white']}, Black: {win_counts['black']}, Draws: {win_counts['draw']}")
+    # Log final training progress
+    log_training_progress(log_file)
     
     return agent
 
 
-def play_against_model(model_path, human_player="white"):
-    """Play a game against the trained model"""
-    # Create the chess environment
-    env = ChessEnv()
+def play_against_model(model_path, human_player="white", visualize=True):
+    """
+    Play a game against a trained model.
     
-    # Get the state shape and action size
+    Args:
+        model_path: Path to the model file
+        human_player: Which side the human plays ("white" or "black")
+        visualize: Whether to use the graphical visualizer
+    """
+    # Initialize environment and agent
+    env = ChessEnv(visualize=visualize)
     state_shape = env.observation_space_shape
     action_size = env.action_space_size
     
-    # Create the agent
     agent = SelfPlayAgent(state_shape, action_size)
-    
-    # Load the trained model
     agent.load(model_path)
-    agent.epsilon = 0.05  # Small epsilon for some exploration
+    agent.epsilon = 0.0  # No exploration during play
     
-    # Play a game
+    # Reset environment
     state = env.reset()
-    env.render()
-    
     done = False
     move_count = 0
     
-    # Determine if human plays as white or black
-    human_is_white = human_player.lower() == "white"
+    # Render initial state
+    env.render()
     
-    while not done and move_count < 100:
-        current_player = "white" if env.engine.white_to_move else "black"
+    # Main game loop
+    while not done and move_count < 200:  # Limit to 200 moves
+        # Determine whose turn it is
+        is_human_turn = (env.engine.white_to_move and human_player == "white") or \
+                        (not env.engine.white_to_move and human_player == "black")
         
-        # Human's turn
-        if (human_is_white and current_player == "white") or (not human_is_white and current_player == "black"):
-            print(f"\nYour turn ({current_player}):")
+        # Get valid actions
+        valid_actions = env.get_valid_actions()
+        
+        if not valid_actions:
+            break
+        
+        if is_human_turn:
+            # Human player's turn
+            print("Your turn!")
             
-            # Get valid moves in algebraic notation for display
-            valid_moves = env.engine.get_valid_moves()
-            valid_moves_algebraic = []
-            
-            for move in valid_moves:
-                start_row, start_col = move[0]
-                end_row, end_col = move[1]
+            # Display valid moves
+            print("Valid moves:")
+            for i, action in enumerate(valid_actions):
+                start_idx = action // 64
+                end_idx = action % 64
+                
+                start_row, start_col = start_idx // 8, start_idx % 8
+                end_row, end_col = end_idx // 8, end_idx % 8
+                
                 start_alg = chr(start_col + ord('a')) + str(8 - start_row)
                 end_alg = chr(end_col + ord('a')) + str(8 - end_row)
-                valid_moves_algebraic.append(f"{start_alg}{end_alg}")
-            
-            # Display some valid moves as hints
-            print(f"Some valid moves: {', '.join(valid_moves_algebraic[:5])}" + (" ..." if len(valid_moves_algebraic) > 5 else ""))
+                
+                print(f"{i+1}: {start_alg}{end_alg}")
             
             # Get human move
-            while True:
-                move_input = input("Enter your move (e.g., e2e4) or 'quit' to exit: ").strip().lower()
-                
-                if move_input == 'quit':
-                    return
-                
-                # Parse the move
-                if len(move_input) != 4:
-                    print("Invalid move format! Use format 'e2e4'.")
-                    continue
-                
-                start_col = ord(move_input[0]) - ord('a')
-                start_row = 8 - int(move_input[1])
-                end_col = ord(move_input[2]) - ord('a')
-                end_row = 8 - int(move_input[3])
-                
-                if not (0 <= start_row < 8 and 0 <= start_col < 8 and 0 <= end_row < 8 and 0 <= end_col < 8):
-                    print("Move out of bounds! Try again.")
-                    continue
-                
-                # Convert to action
-                start_idx = start_row * 8 + start_col
-                end_idx = end_row * 8 + end_col
-                action = start_idx * 64 + end_idx
-                
-                # Check if the move is valid
-                if move_input in valid_moves_algebraic:
-                    break
-                else:
-                    print("Invalid move! Try again.")
-            
-            # Take the action
-            next_state, reward, done, info = env.step(action)
-            
-        # AI's turn
+            valid_input = False
+            while not valid_input:
+                try:
+                    move_input = input("Enter move (e.g., 'e2e4' or move number): ")
+                    
+                    if move_input.isdigit():
+                        # Input is a move number
+                        move_idx = int(move_input) - 1
+                        if 0 <= move_idx < len(valid_actions):
+                            action = valid_actions[move_idx]
+                            valid_input = True
+                        else:
+                            print(f"Invalid move number. Please enter a number between 1 and {len(valid_actions)}")
+                    else:
+                        # Input is algebraic notation
+                        if len(move_input) != 4:
+                            print("Invalid format. Please use format 'e2e4'")
+                            continue
+                        
+                        start_col = ord(move_input[0].lower()) - ord('a')
+                        start_row = 8 - int(move_input[1])
+                        end_col = ord(move_input[2].lower()) - ord('a')
+                        end_row = 8 - int(move_input[3])
+                        
+                        if not (0 <= start_row < 8 and 0 <= start_col < 8 and 0 <= end_row < 8 and 0 <= end_col < 8):
+                            print("Invalid coordinates. Row must be 1-8, column must be a-h")
+                            continue
+                        
+                        start_idx = start_row * 8 + start_col
+                        end_idx = end_row * 8 + end_col
+                        action = start_idx * 64 + end_idx
+                        
+                        if action not in valid_actions:
+                            print("Invalid move. Please choose from the list of valid moves")
+                            continue
+                        
+                        valid_input = True
+                except Exception as e:
+                    print(f"Error: {e}")
+                    print("Invalid input. Please try again")
         else:
-            print(f"\nAI's turn ({current_player}):")
-            
-            # Get valid actions
-            valid_actions = env.get_valid_actions()
-            
-            if not valid_actions:
-                break
-            
-            # Choose an action
+            # AI player's turn
+            print("AI thinking...")
             action = agent.act(state, valid_actions, training=False)
             
             # Decode the action for display
-            start_square_idx = action // 64
-            end_square_idx = action % 64
+            start_idx = action // 64
+            end_idx = action % 64
             
-            start_row, start_col = start_square_idx // 8, start_square_idx % 8
-            end_row, end_col = end_square_idx // 8, end_square_idx % 8
+            start_row, start_col = start_idx // 8, start_idx % 8
+            end_row, end_col = end_idx // 8, end_idx % 8
             
             start_alg = chr(start_col + ord('a')) + str(8 - start_row)
             end_alg = chr(end_col + ord('a')) + str(8 - end_row)
             
             print(f"AI moves: {start_alg}{end_alg}")
-            
-            # Take the action
-            next_state, reward, done, info = env.step(action)
         
-        # Update state
+        # Take the action
+        next_state, reward, done, info = env.step(action)
+        
+        # Update state and counters
         state = next_state
         move_count += 1
         
-        # Render the environment
+        # Render the board
         env.render()
-        
-        # Check for game end
-        if env.engine.checkmate:
-            winner = "Black" if env.engine.white_to_move else "White"
-            print(f"\nCheckmate! {winner} wins!")
-        elif env.engine.stalemate:
-            print("\nStalemate! The game is a draw.")
     
-    if move_count >= 100:
-        print("\nGame ended due to move limit. It's a draw.")
+    # Game over
+    if env.engine.checkmate:
+        winner = "Black" if env.engine.white_to_move else "White"
+        print(f"Checkmate! {winner} wins!")
+    elif env.engine.stalemate:
+        print("Stalemate! It's a draw.")
+    else:
+        print("Game ended. It's a draw (max moves reached).")
+    
+    return
 
 
 if __name__ == "__main__":
-    # Train the agent using self-play
-    print("Starting self-play training...")
-    agent = self_play_training(episodes=500, save_freq=100)
+    import argparse
     
-    # Uncomment to play against the trained model
-    # play_against_model("models/chess_model_final.weights.h5", human_player="white") 
+    parser = argparse.ArgumentParser(description="Chess self-play training")
+    parser.add_argument("--episodes", type=int, default=1000, help="Number of episodes to train for")
+    parser.add_argument("--save_freq", type=int, default=100, help="How often to save the model")
+    parser.add_argument("--model_dir", type=str, default="models", help="Directory to save models")
+    parser.add_argument("--log_file", type=str, default="training_log.json", help="File to log training progress")
+    parser.add_argument("--play", action="store_true", help="Play against a trained model")
+    parser.add_argument("--model", type=str, help="Model to play against")
+    parser.add_argument("--human_player", type=str, default="white", choices=["white", "black"], help="Which side the human plays")
+    parser.add_argument("--visualize", action="store_true", help="Use the graphical visualizer")
+    
+    args = parser.parse_args()
+    
+    if args.play:
+        if not args.model:
+            print("Please specify a model to play against with --model")
+            exit(1)
+        play_against_model(args.model, human_player=args.human_player, visualize=args.visualize)
+    else:
+        self_play_training(episodes=args.episodes, save_freq=args.save_freq, model_dir=args.model_dir, log_file=args.log_file, visualize=args.visualize) 

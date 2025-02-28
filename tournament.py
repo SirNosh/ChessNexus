@@ -5,11 +5,12 @@ from chess_env import ChessEnv
 from self_play import SelfPlayAgent
 
 class Tournament:
-    def __init__(self, model_dir="models"):
+    def __init__(self, model_dir="models", visualize=False):
         self.model_dir = model_dir
-        self.env = ChessEnv()
+        self.env = ChessEnv(visualize=visualize)
         self.state_shape = self.env.observation_space_shape
         self.action_size = self.env.action_space_size
+        self.visualize = visualize
     
     def load_agent(self, model_path):
         """Load an agent from a model file"""
@@ -52,132 +53,108 @@ class Tournament:
             
             if render:
                 self.env.render()
-                
-                # Decode the action for display
-                start_square_idx = action // 64
-                end_square_idx = action % 64
-                
-                start_row, start_col = start_square_idx // 8, start_square_idx % 8
-                end_row, end_col = end_square_idx // 8, end_square_idx % 8
-                
-                start_alg = chr(start_col + ord('a')) + str(8 - start_row)
-                end_alg = chr(end_col + ord('a')) + str(8 - end_row)
-                
-                player = "White" if self.env.engine.white_to_move else "Black"
-                print(f"{player} moves: {start_alg}{end_alg}")
         
         # Determine the winner
         if self.env.engine.checkmate:
-            winner = "black" if self.env.engine.white_to_move else "white"
-        elif self.env.engine.stalemate or move_count >= max_moves:
-            winner = "draw"
+            winner = "Black" if self.env.engine.white_to_move else "White"
+        elif self.env.engine.stalemate:
+            winner = "Draw"
         else:
-            winner = "draw"  # Default to draw if game ended for other reasons
+            winner = "Draw (max moves reached)"
         
         return winner, move_count
     
     def run_tournament(self, model_paths, num_games=10, render=False):
         """Run a tournament between multiple models"""
-        # Load agents
-        agents = {}
-        for model_path in model_paths:
-            model_name = os.path.basename(model_path).replace(".weights.h5", "")
-            agents[model_name] = self.load_agent(model_path)
+        if len(model_paths) < 2:
+            print("Need at least 2 models for a tournament")
+            return
         
-        # Initialize results
-        results = {name: {"wins": 0, "losses": 0, "draws": 0} for name in agents.keys()}
+        # Load all agents
+        agents = []
+        for path in model_paths:
+            agents.append(self.load_agent(path))
         
-        # Play matches
-        for i, white_name in enumerate(agents.keys()):
-            for j, black_name in enumerate(agents.keys()):
-                if i == j:  # Skip self-play
-                    continue
+        # Initialize results matrix
+        num_agents = len(agents)
+        results = np.zeros((num_agents, num_agents, 3))  # [wins, losses, draws]
+        
+        # Play matches between all pairs of agents
+        for i in range(num_agents):
+            for j in range(i+1, num_agents):
+                print(f"Match between {os.path.basename(model_paths[i])} and {os.path.basename(model_paths[j])}")
                 
-                print(f"\nPlaying {num_games} games: {white_name} (White) vs {black_name} (Black)")
-                
-                white_wins = 0
-                black_wins = 0
-                draws = 0
-                
+                # Play multiple games
                 for game in range(num_games):
-                    print(f"Game {game+1}/{num_games}")
-                    winner, moves = self.play_match(agents[white_name], agents[black_name], render=render)
+                    print(f"  Game {game+1}/{num_games}")
                     
-                    if winner == "white":
-                        white_wins += 1
-                        results[white_name]["wins"] += 1
-                        results[black_name]["losses"] += 1
-                        print(f"White ({white_name}) wins in {moves} moves")
-                    elif winner == "black":
-                        black_wins += 1
-                        results[white_name]["losses"] += 1
-                        results[black_name]["wins"] += 1
-                        print(f"Black ({black_name}) wins in {moves} moves")
+                    # Alternate who plays white
+                    if game % 2 == 0:
+                        white_agent, black_agent = agents[i], agents[j]
+                        white_idx, black_idx = i, j
                     else:
-                        draws += 1
-                        results[white_name]["draws"] += 1
-                        results[black_name]["draws"] += 1
-                        print(f"Draw after {moves} moves")
-                
-                print(f"Results: White wins: {white_wins}, Black wins: {black_wins}, Draws: {draws}")
+                        white_agent, black_agent = agents[j], agents[i]
+                        white_idx, black_idx = j, i
+                    
+                    # Play the match
+                    winner, moves = self.play_match(white_agent, black_agent, render=render)
+                    print(f"    Winner: {winner} in {moves} moves")
+                    
+                    # Update results
+                    if winner == "White":
+                        results[white_idx, black_idx, 0] += 1
+                        results[black_idx, white_idx, 1] += 1
+                    elif winner == "Black":
+                        results[black_idx, white_idx, 0] += 1
+                        results[white_idx, black_idx, 1] += 1
+                    else:  # Draw
+                        results[white_idx, black_idx, 2] += 1
+                        results[black_idx, white_idx, 2] += 1
         
-        # Print tournament results
+        # Print results
         print("\nTournament Results:")
-        print("-------------------")
+        print("Model".ljust(30) + "Wins".rjust(10) + "Losses".rjust(10) + "Draws".rjust(10) + "Win %".rjust(10))
+        print("-" * 70)
         
-        # Calculate points (win=1, draw=0.5, loss=0)
-        points = {}
-        for name, result in results.items():
-            points[name] = result["wins"] + 0.5 * result["draws"]
-        
-        # Sort by points
-        sorted_results = sorted(points.items(), key=lambda x: x[1], reverse=True)
-        
-        for i, (name, score) in enumerate(sorted_results):
-            print(f"{i+1}. {name}: {score} points ({results[name]['wins']} wins, {results[name]['draws']} draws, {results[name]['losses']} losses)")
+        for i in range(num_agents):
+            wins = np.sum(results[i, :, 0])
+            losses = np.sum(results[i, :, 1])
+            draws = np.sum(results[i, :, 2])
+            total = wins + losses + draws
+            win_pct = (wins + 0.5 * draws) / total * 100 if total > 0 else 0
+            
+            model_name = os.path.basename(model_paths[i])
+            print(f"{model_name[:30].ljust(30)}{int(wins):10d}{int(losses):10d}{int(draws):10d}{win_pct:10.1f}")
         
         return results
 
 def find_model_files(model_dir="models", pattern="chess_model_episode_"):
-    """Find model files in the model directory"""
+    """Find all model files in the given directory"""
     if not os.path.exists(model_dir):
-        print(f"Model directory {model_dir} not found.")
+        print(f"Model directory {model_dir} does not exist")
         return []
     
     model_files = []
-    for file in os.listdir(model_dir):
-        if file.endswith(".weights.h5") and pattern in file:
-            model_files.append(os.path.join(model_dir, file))
+    for filename in os.listdir(model_dir):
+        if filename.startswith(pattern) and filename.endswith(".weights.h5"):
+            model_files.append(os.path.join(model_dir, filename))
     
     return sorted(model_files)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Run a tournament between chess models')
-    parser.add_argument('--model_dir', type=str, default='models',
-                        help='Directory containing model files')
-    parser.add_argument('--num_games', type=int, default=5,
-                        help='Number of games to play between each pair of models')
-    parser.add_argument('--render', action='store_true',
-                        help='Render the games')
-    parser.add_argument('--models', nargs='+',
-                        help='Specific model files to use (if not specified, all models in the directory will be used)')
-    
+    parser = argparse.ArgumentParser(description="Run a chess tournament between trained models")
+    parser.add_argument("--model_dir", type=str, default="models", help="Directory containing model files")
+    parser.add_argument("--num_games", type=int, default=10, help="Number of games to play between each pair of models")
+    parser.add_argument("--render", action="store_true", help="Render the games")
+    parser.add_argument("--visualize", action="store_true", help="Use the graphical visualizer")
     args = parser.parse_args()
     
     # Find model files
-    if args.models:
-        model_paths = [os.path.join(args.model_dir, model) for model in args.models]
+    model_files = find_model_files(args.model_dir)
+    
+    if not model_files:
+        print(f"No model files found in {args.model_dir}")
     else:
-        model_paths = find_model_files(args.model_dir)
-    
-    if not model_paths:
-        print("No model files found.")
-        exit(1)
-    
-    print(f"Found {len(model_paths)} model files:")
-    for path in model_paths:
-        print(f"  {path}")
-    
-    # Run tournament
-    tournament = Tournament(args.model_dir)
-    tournament.run_tournament(model_paths, num_games=args.num_games, render=args.render) 
+        # Run tournament
+        tournament = Tournament(model_dir=args.model_dir, visualize=args.visualize)
+        tournament.run_tournament(model_files, num_games=args.num_games, render=args.render) 

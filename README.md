@@ -9,6 +9,7 @@ A sophisticated chess environment implemented in Python with advanced reinforcem
 - Train agents through self-play
 - Visualize training progress
 - Run tournaments between different model versions
+- **NEW**: Real-time visualization of games during training and tournaments
 
 ## Setup
 
@@ -17,7 +18,12 @@ A sophisticated chess environment implemented in Python with advanced reinforcem
 pip install -r requirements.txt
 ```
 
-2. Run the game:
+2. Download chess piece images for the visualizer:
+```
+python download_pieces.py
+```
+
+3. Run the game:
 ```
 # For graphical interface
 python chess_game.py
@@ -31,14 +37,17 @@ python chess_env.py
 # For DQN agent information
 python dqn_agent.py
 
-# For self-play training
-python self_play.py
+# For self-play training (add --visualize to see games in real-time)
+python self_play.py --visualize
 
 # For visualizing training progress
 python visualize_training.py --log_file training_log.json
 
-# For running a tournament between models
-python tournament.py --model_dir models --num_games 5
+# For running a tournament between models (add --visualize for real-time visualization)
+python tournament.py --model_dir models --num_games 5 --visualize
+
+# For playing against a trained model with visualization
+python self_play.py --play --model models/chess_model_episode_100.weights.h5 --visualize
 ```
 
 ## Graphical Interface Controls
@@ -231,4 +240,19 @@ This is useful for:
 - DQN agent for learning to play chess
 - Self-play training with experience memory
 - Training progress visualization
-- Model comparison through tournaments 
+- Model comparison through tournaments
+
+## Real-time Game Visualizer
+
+The new visualizer allows you to watch games in real-time during:
+- Self-play training
+- Tournament play between models
+- Human vs AI games
+
+Features:
+- Graphical representation of the chess board and pieces
+- Highlighting of the last move made
+- Board coordinates (a-h, 1-8)
+- Close the window to exit the visualizer
+
+To use the visualizer, add the `--visualize` flag to the command when running self-play training or tournaments. 
