@@ -9,7 +9,7 @@ A sophisticated chess environment implemented in Python with advanced reinforcem
 - Train agents through self-play
 - Visualize training progress
 - Run tournaments between different model versions
-- **NEW**: Real-time visualization of games during training and tournaments
+- Real-time visualization of games during training and tournaments
 - **NEW**: Parallel training on multiple games simultaneously
 
 ## Setup
@@ -284,4 +284,4 @@ Command-line options:
 - `--log_file`: File to log training progress (default: "parallel_training_log.json")
 - `--visualize`: Enable visualization of all games
 
-The parallel training system combines knowledge from all games after each iteration, allowing the agent to learn more efficiently than training on a single game at a time. 
+The parallel training system combines knowledge from all games after each iteration, allowing the agent to learn more efficiently than training on a single game at a time.
