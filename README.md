@@ -10,6 +10,7 @@ A sophisticated chess environment implemented in Python with advanced reinforcem
 - Visualize training progress
 - Run tournaments between different model versions
 - **NEW**: Real-time visualization of games during training and tournaments
+- **NEW**: Parallel training on multiple games simultaneously
 
 ## Setup
 
@@ -39,6 +40,9 @@ python dqn_agent.py
 
 # For self-play training (add --visualize to see games in real-time)
 python self_play.py --visualize
+
+# For parallel self-play training on multiple games simultaneously
+python parallel_self_play.py --num_games 4 --visualize
 
 # For visualizing training progress
 python visualize_training.py --log_file training_log.json
@@ -255,4 +259,29 @@ Features:
 - Board coordinates (a-h, 1-8)
 - Close the window to exit the visualizer
 
-To use the visualizer, add the `--visualize` flag to the command when running self-play training or tournaments. 
+To use the visualizer, add the `--visualize` flag to the command when running self-play training or tournaments.
+
+## Parallel Training
+
+The parallel training system allows you to train on multiple games simultaneously, which offers several advantages:
+
+- **Faster Training**: Collects experiences from multiple games at once
+- **Better Generalization**: The agent learns from a variety of game situations in parallel
+- **Efficient Resource Usage**: Makes better use of CPU/GPU resources
+- **Visual Feedback**: Watch multiple games unfold simultaneously in the visualizer
+
+To use parallel training:
+
+```
+python parallel_self_play.py --num_games 4 --visualize
+```
+
+Command-line options:
+- `--num_games`: Number of games to run in parallel (default: 4)
+- `--episodes`: Number of episodes to train for (default: 1000)
+- `--save_freq`: How often to save the model (default: 100)
+- `--model_dir`: Directory to save models (default: "models")
+- `--log_file`: File to log training progress (default: "parallel_training_log.json")
+- `--visualize`: Enable visualization of all games
+
+The parallel training system combines knowledge from all games after each iteration, allowing the agent to learn more efficiently than training on a single game at a time. 
