@@ -9,7 +9,7 @@ A sophisticated chess environment implemented in Python with advanced reinforcem
 - Train agents through self-play
 - Visualize training progress
 - Run tournaments between different model versions
-- **NEW**: Real-time visualization of games during training and tournaments
+- Real-time visualization of games during training and tournaments
 
 ## Setup
 
