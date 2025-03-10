@@ -44,6 +44,9 @@ python self_play.py --visualize
 # For parallel self-play training on multiple games simultaneously
 python parallel_self_play.py --num_games 4 --visualize
 
+# For CUDA 12.8 optimized training on NVIDIA GPUs (recommended for RTX 4070 Super)
+python parallel_self_play.py --num_games 8 --episodes 2000 --save_freq 100 --eval_freq 50 --batch_size 256
+
 # For visualizing training progress
 python visualize_training.py --log_file training_log.json
 
@@ -214,6 +217,40 @@ This is useful for:
 - Evaluating the improvement of models over training
 - Identifying the strongest model
 - Understanding if newer models are actually better than older ones
+
+## GPU Acceleration
+
+The project supports GPU-accelerated training for faster model development:
+
+### CUDA 12.8 Optimization
+The training system is optimized for NVIDIA GPUs with CUDA 12.8, providing significant performance improvements:
+
+- Optimized TensorFlow configuration for CUDA
+- JIT compilation for critical operations
+- Mixed precision training (FP16/FP32)
+- Efficient memory management
+- Parallel game simulation
+
+For optimal performance on NVIDIA GPUs, use the dedicated command:
+```
+python parallel_self_play.py --num_games 8 --episodes 2000 --save_freq 100 --eval_freq 50 --batch_size 256
+```
+
+Key parameters for GPU training:
+- `num_games`: Number of parallel games (8 recommended for RTX 4070 Super)
+- `batch_size`: Training batch size (256 recommended for 12GB VRAM)
+- `episodes`: Total training episodes to run
+
+The system automatically configures TensorFlow for optimal CUDA 12.8 performance, including:
+- Memory growth settings
+- XLA compilation
+- Mixed precision policies
+- Tensor layout optimization
+
+### Performance Considerations
+- NVIDIA RTX 4070 Super (or better) is recommended for training
+- For GPUs with less VRAM, reduce batch_size and num_games accordingly
+- Training time is approximately 5-10x faster on GPU vs CPU
 
 ## Files
 
