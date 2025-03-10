@@ -144,6 +144,35 @@ class ChessEnv:
         if self.visualize and self.visualizer:
             self.visualizer.close()
 
+    def get_game_status(self):
+        """
+        Get the current status of the chess game.
+        
+        Returns:
+            str: A string describing the current game status
+        """
+        if not self.engine:
+            return "Not initialized"
+        
+        if self.engine.checkmate:
+            winner = "Black" if self.engine.white_to_move else "White"
+            return f"{winner} wins by checkmate"
+        
+        if self.engine.stalemate:
+            return "Draw by stalemate"
+        
+        if self.engine.insufficient_material:
+            return "Draw by insufficient material"
+        
+        if self.engine.can_claim_fifty_moves():
+            return "Draw by fifty-move rule"
+        
+        if self.engine.can_claim_threefold_repetition():
+            return "Draw by threefold repetition"
+        
+        # Still in progress
+        return "In progress"
+
 
 # Example usage
 if __name__ == "__main__":
